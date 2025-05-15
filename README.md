@@ -14,3 +14,13 @@
 - 🌐 **Scalable Materials Discovery:** Extends to unexplored, higher-order HEC systems for accelerated design of novel materials.
 
 ---
+
+## 🔁 Project Workflow
+
+<p align="center">
+  <img src="assets/Main_Figure.png" alt="Project Workflow Diagram" width="700"/>
+</p>
+
+This diagram summarizes the `deepHEC-opt` pipeline — from feature generation and GNN-based prediction to multi-objective filtering and candidate discovery. It highlights how AI and optimization are combined to accelerate scalable exploration of high-entropy carbides.
+
+---
