@@ -1,0 +1,13 @@
+#!/bin/bash
+#$ -cwd
+#$ -j y
+#$ -pe parallel 96
+#$ -l infiniband=ddy-i
+#$ -l h_rt=240:0:0
+#$ -l rocky
+
+module load vasp
+
+mpirun -np ${NSLOTS} vasp_std
+
+

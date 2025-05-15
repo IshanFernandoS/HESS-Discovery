@@ -1,0 +1,29 @@
+SYSTEM  = Order1 (Structural Relaxation)
+
+# --- Ionic Relaxation Settings ---
+IBRION = -1         # Conjugate-gradient algorithm
+NSW    = 0        # Max number of ionic (structural) steps
+ISIF   = 0         # Relax atoms + cell shape + cell volume
+
+# --- Electronic Settings ---
+PREC   = Accurate
+ENCUT  = 350       # Plane-wave cutoff (eV) 
+                   # Make sure this is >= max ENMAX from POTCARs
+EDIFF  = 1E-6      # Electronic SCF convergence (energy)
+EDIFFG = -0.02     # Structure convergence criterion (force in eV/Å); adjust as needed
+
+# --- Partial Occupations / Smearing ---
+ISMEAR = 1         # Methfessel-Paxton (common for metals)
+SIGMA  = 0.1       # Smearing width (eV). Increase slightly (e.g. 0.2) if needed.
+
+# --- Symmetry & Output ---
+ISYM   = 2         # Apply standard symmetry
+LORBIT = 0         # Minimal orbital-projected output; 
+                   # For debugging or partial DOS analysis, use LORBIT=10 or 11
+LWAVE  = .FALSE.   # Wavefunction file not needed unless you want further analysis
+LCHARGE= .FALSE.   # Charge density file not strictly necessary for a basic relaxation
+
+# --- Bands (often optional to set manually) ---
+# NBANDS = 33      # Typically let VASP choose automatically unless there's a specific reason
+
+NCORE = 24

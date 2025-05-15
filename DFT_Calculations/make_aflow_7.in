@@ -1,0 +1,1 @@
+./AFLOW-src/src/aflow --aflow_proto=AB_cF8_225_a_b.AB:C:Cr:Hf:Mo:Nb:Ta:Ti:Zr --params=-1 --pocc_params=P0-1xA_P1-0.14286xB-0.14286xC-0.14286xD-0.14286xE-0.14286xF-0.14286xG-0.14286xH --generate_aflowin_only
