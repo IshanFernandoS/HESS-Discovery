@@ -17,16 +17,10 @@
 
 ## 🔁 Project Workflow
 
-<!-- Inline PDF (centered) -->
 <div style="text-align:center">
-  <object
-    data="assets/Main%20(1).pdf#view=FitH"
-    type="application/pdf"
-    width="700"
-    height="500">
-    <a href="assets/Main%20(1).pdf">Open the PDF</a>
-  </object>
+  <img src="assets/Main.svg" alt="Project Workflow Diagram" width="700" style="max-width:100%;height:auto;">
 </div>
+
 
 
 This diagram summarizes the `deepHEC-opt` pipeline — from feature generation and GNN-based prediction to multi-objective filtering and candidate discovery. It highlights how AI and optimization are combined to accelerate scalable exploration of high-entropy carbides.
