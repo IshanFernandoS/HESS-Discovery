@@ -18,7 +18,7 @@
 ## 🔁 Project Workflow
 
 <div style="text-align:center">
-  <img src="assets/Main.svg" alt="Project Workflow Diagram" width="700" style="max-width:100%;height:auto;">
+  <img src="assets/HEC_Paper_Main.png" alt="Project Workflow Diagram" width="700" style="max-width:100%;height:auto;">
 </div>
 
 
