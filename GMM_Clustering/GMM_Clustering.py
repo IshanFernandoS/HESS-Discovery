@@ -105,8 +105,56 @@ df["Composition"] = df[comp_col].astype(str).map(canonicalize)
 df["n_metals"] = df["Composition"].apply(count_metals)
 
 # Attach weak labels if missing (1=Single, 0=Multi)
-single_phase_lit  = ['(CrHfMoNbTaTiVZr)C8','(CrHfNbTaTiVWZr)C8','(CrHfNbTaTi)C5','(CrHfNbTaV)C5','(CrHfTaTiZr)C5','(CrMoNbTaW)C5','(CrMoNbVW)C5','(CrMoTaVW)C5','(CrMoTiVW)C5','(HfLaMoNbTaTiWZr)C8','(HfLaNbTaTiYZr)C7','(HfLaTaTiYZr)C6','(HfMoNbTaTi)C5','(HfMoNbTaTiVWZr)C8','(HfMoNbTaTiWZr)C7','(HfMoNbTaTiZr)C6','(HfMoNbTaV)C5','(HfMoNbTaZr)C5','(HfMoTaTiZr)C5','(HfNbTaTiV)C5','(HfNbTaTiVWZr)C7','(HfNbTaTiVZr)C6','(HfNbTaTiW)C5','(HfNbTaTiWZr)C6','(HfNbTaTiZr)C5','(HfNbTaVW)C5','(HfNbTaVZr)C5','(HfNbTiVZr)C5','(HfTaTiVZr)C5','(HfTaTiWZr)C5','(MoNbTaTiV)C5','(MoNbTaTiW)C5','(MoNbTaTiZr)C5','(MoNbTaVW)C5','(MoNbTaVZr)C5','(NbTaTiVW)C5','(NbTaTiVZr)C5','(NbTaTiWZr)C5','(NbTaVWZr)C5']
-multi_phase_lit   = ['(CrHfMoTiW)C5','(CrHfMoVW)C5','(CrHfMoWZr)C5','(CrHfNbVW)C5','(CrHfNbWZr)C5','(CrHfTaVW)C5','(CrHfTaWZr)C5','(CrHfTiVW)C5','(CrHfTiWZr)C5','(CrHfVWZr)C5','(CrMoTiVZr)C5','(CrMoTiWZr)C5','(CrNbTiWZr)C5','(CrNbVWZr)C5','(CrTaTiWZr)C5','(CrTaVWZr)C5','(CrTiVWZr)C5','(HfMoTaWZr)C5','(HfMoTiWZr)C5','(HfMoVWZr)C5','(MoTiVWZr)C5']
+single_phase_lit = [
+    "(CrHfMoNbTaTiVZr)C8",
+    "(CrHfNbTaTiVWZr)C8",
+    "(CrHfNbTaTi)C5",
+    "(CrHfNbTaV)C5",
+    "(CrHfTaTiZr)C5",
+    "(CrMoNbTaW)C5",
+    "(CrMoNbVW)C5",
+    "(CrMoTaVW)C5",
+    "(CrMoTiVW)C5",
+    "(HfMoNbTaTi)C5",
+    "(HfMoNbTaTiVWZr)C8",
+    "(HfMoNbTaTiZr)C6",
+    "(HfMoNbTaV)C5",
+    "(HfMoNbTaZr)C5",
+    "(HfMoTaTiZr)C5",
+    "(HfNbTaTiV)C5",
+    "(HfNbTaTiVZr)C6",
+    "(HfNbTaTiW)C5",
+    "(HfNbTaTiWZr)C6",
+    "(HfNbTaTiZr)C5",
+    "(HfNbTaVW)C5",
+    "(HfTaTiWZr)C5",
+    "(MoNbTaTiV)C5",
+    "(MoNbTaTiW)C5",
+    "(MoNbTaTiZr)C5",
+    "(MoNbTaVW)C5",
+    "(MoNbTaVZr)C5",
+    "(NbTaTiVW)C5",
+    "(NbTaTiWZr)C5",
+    "(NbTaVWZr)C5",
+    "(CrNbTaTiZr)C5",
+    "(CrHfNbTaZr)C5",
+    "(MoNbTaTiVW)C6",
+    "(HfNbTaWZr)C5",
+    "(MoNbTaWZr)C5", 
+]
+
+multi_phase_lit = [
+    "(CrHfMoTiW)C5",
+    "(CrHfMoVW)C5",
+    "(CrHfTaVW)C5",
+    "(CrHfTaWZr)C5",
+    "(CrMoTiVZr)C5",
+    "(CrMoTiWZr)C5",
+    "(HfMoTaWZr)C5",
+    "(HfMoTiWZr)C5",
+    "(HfMoVWZr)C5",
+    "(MoTiVWZr)C5",
+]
 
 lab_map = {canonicalize(x): 1 for x in single_phase_lit}
 lab_map.update({canonicalize(x): 0 for x in multi_phase_lit})
@@ -507,5 +555,6 @@ for (_c, feat_col) in plot_feats_unique:
     plt.tight_layout()
     plt.savefig(OUT / f"posterior_vs_{feat_col.replace(' ', '_')}_with_selected.png", dpi=240)
     plt.close(fig)
+
 
 print("Saved outputs in:", OUT.resolve())
