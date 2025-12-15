@@ -16,11 +16,11 @@ Candidate compositions are represented as **permutation-invariant element graphs
 
 ### Physics-informed multi-objective screening
 In parallel, each composition is embedded in a **multi-objective descriptor space** designed to capture competing constraints relevant to synthesizability and phase stability, including:
-- **Thermodynamic competition and stability:** \(\Delta H_{\mathrm{carb}}\)
-- **Hume–Rothery-type compatibility:** \(\delta r\), \(\delta\chi\), \(\langle \mathrm{VEC} \rangle\) window
-- **Carbide bonding and carbon affinity (“weakest-link”):** \(H_{\mathrm{weak}}\)
-- **Segregation/ordering and magnetic-disorder risk:** MSI, MDRI
-- **Processing constraints:** e.g., minimum precursor carbide melting point \(T_m^{\min}\)
+- **Thermodynamic competition and stability:** ΔH_carb  
+- **Hume–Rothery-type compatibility:** δr, δχ, and an average VEC window (⟨VEC⟩)  
+- **Carbide bonding / carbon affinity (“weakest-link”):** H_weak  
+- **Segregation/ordering and magnetic-disorder risk:** MSI, MDRI  
+- **Processing constraints:** minimum precursor carbide melting point, Tm_min
 
 A **Gaussian mixture model (GMM)** over this objective space yields a **posterior solid-solution likelihood** and delineates a coherent **solid-solution basin**.
 
