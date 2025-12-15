@@ -1,21 +1,9 @@
-# deepHEC-opt
+# HESS Discovery
+**A screening-and-prediction framework for scalable discovery of high-order high-entropy carbides.**
 
-**AI-Accelerated Scalable Discovery of High-Entropy Carbides via Deep Graph Learning and Multi-Objective Optimization**
+HESS Discovery identifies promising transition-metal carbide compositions from a combinatorial design space using two complementary, order-agnostic signals: **graph-based EFA prediction** and **physics-informed multi-objective screening**.
 
-`deepHEC-opt` is a scalable framework that combines deep graph neural networks with multi-objective optimization to accelerate the discovery of high-entropy carbides (HECs). The project supports material property prediction, composition ranking, and synthesizability screening, enabling efficient exploration of the vast HEC design space.
-
----
-
-## 🔬 Project Highlights
-
-- 📊 **Graph Neural Networks (GNNs):** Predict Entropy Forming Ability (EFA) and phase stability of HECs directly from elemental compositions.
-- 🧠 **Custom Deep Learning Architecture:** Utilizes GATv2-based models optimized for small-scale, high-fidelity materials datasets.
-- 🎯 **Multi-Objective Optimization:** Applies weighted objective filtering to identify candidates with high single-phase formation ability and potential synthesizability.
-- 🌐 **Scalable Materials Discovery:** Extends to unexplored, higher-order HEC systems for accelerated design of novel materials.
-
----
-
-## 🔁 Project Workflow
+## Workflow
 
 <div style="text-align:center">
   <img src="assets/HEC_Paper_Main.png" alt="Project Workflow Diagram" width="700" style="max-width:100%;height:auto;">
@@ -23,6 +11,29 @@
 
 
 
-This diagram summarizes the `deepHEC-opt` pipeline — from feature generation and GNN-based prediction to multi-objective filtering and candidate discovery. It highlights how AI and optimization are combined to accelerate scalable exploration of high-entropy carbides.
+### Graph neural network EFA prediction
+Candidate compositions are represented as **permutation-invariant element graphs** (metal species plus a carbon node). A **graph-attention neural network** predicts **entropy-forming ability (EFA)** directly from the composition graph, enabling transfer from **quinary (HEC5)** training data to **higher-order** composition spaces.
 
----
+### Physics-informed multi-objective screening
+In parallel, each composition is embedded in a **multi-objective descriptor space** designed to capture competing constraints relevant to synthesizability and phase stability, including:
+- **Thermodynamic competition and stability:** \(\Delta H_{\mathrm{carb}}\)
+- **Hume–Rothery-type compatibility:** \(\delta r\), \(\delta\chi\), \(\langle \mathrm{VEC} \rangle\) window
+- **Carbide bonding and carbon affinity (“weakest-link”):** \(H_{\mathrm{weak}}\)
+- **Segregation/ordering and magnetic-disorder risk:** MSI, MDRI
+- **Processing constraints:** e.g., minimum precursor carbide melting point \(T_m^{\min}\)
+
+A **Gaussian mixture model (GMM)** over this objective space yields a **posterior solid-solution likelihood** and delineates a coherent **solid-solution basin**.
+
+## Candidate selection principle
+Final prioritization is based on the **intersection** of:
+- **basin membership** (global posterior likelihood),
+- **per-objective evidence** across screening criteria, and
+- **high predicted EFA** from the GNN.
+
+This combined decision rule reduces false positives that arise when candidates are selected using isolated metrics, and produces a **ranked shortlist** for experimental synthesis and characterization.
+
+
+
+
+
+
