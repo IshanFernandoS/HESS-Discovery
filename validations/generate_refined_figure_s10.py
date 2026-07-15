@@ -620,7 +620,7 @@ def main() -> None:
         default=".",
         help=(
             "Directory containing the manuscript data folder. The manuscript checkpoint "
-            "best_gnn_model_4_2_32_88.0.pth is also expected here unless --checkpoint is supplied."
+            "is expected under checkpoints/ unless --checkpoint is supplied."
         ),
     )
     parser.add_argument(
@@ -640,7 +640,11 @@ def main() -> None:
     outdir = Path(args.outdir)
     data_outdir = Path(args.data_outdir)
     data_outdir.mkdir(parents=True, exist_ok=True)
-    checkpoint = Path(args.checkpoint) if args.checkpoint else deephec / "best_gnn_model_4_2_32_88.0.pth"
+    checkpoint = (
+        Path(args.checkpoint)
+        if args.checkpoint
+        else deephec / "checkpoints" / "best_gnn_model_4_2_32_88.0.pth"
+    )
     if not checkpoint.exists():
         raise FileNotFoundError(
             f"Missing manuscript checkpoint: {checkpoint}. "

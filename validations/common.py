@@ -473,6 +473,157 @@ def qcut_bins(x: Sequence[float], q: int) -> pd.Series:
     return pd.qcut(pd.Series(x).astype(float), q=q, duplicates="drop")
 
 
+def compute_equation_basin_scores(
+    df_x: pd.DataFrame,
+    feature_cols: Sequence[str],
+    n_bins_per_feature: int = 20,
+    roll_smooth: int = 3,
+) -> tuple[pd.DataFrame, pd.DataFrame]:
+    """Compute the descriptor evidence and basin score defined by Eqs. 1--2.
+
+    The fitted GMM supplies ``P_single``.  For each descriptor, ``g_j`` is the
+    quantile-bin mean of that posterior, optionally smoothed across adjacent
+    bins.  A composition's descriptor evidence ``s_j`` is the value of its
+    assigned bin, and ``Basin_score`` is the unweighted mean across available
+    descriptor evidences.  No EFA value or manually weighted composite enters
+    this calculation.
+    """
+    if "P_single" not in df_x.columns:
+        raise ValueError("df_x must contain a 'P_single' column.")
+    if not 0 < int(n_bins_per_feature):
+        raise ValueError("n_bins_per_feature must be positive.")
+
+    bands = []
+    for feat in feature_cols:
+        x = pd.to_numeric(df_x[feat], errors="coerce")
+        p = pd.to_numeric(df_x["P_single"], errors="coerce")
+        ok = ~(x.isna() | p.isna())
+        if ok.sum() < 3:
+            continue
+        bins = qcut_bins(x[ok], q=n_bins_per_feature)
+        tmp = pd.DataFrame({"x": x[ok].to_numpy(), "p": p[ok].to_numpy(), "bin": bins})
+        grouped = tmp.groupby("bin", observed=True)
+        bin_mid = grouped["x"].mean()
+        bin_p = grouped["p"].mean()
+        if roll_smooth and roll_smooth > 1:
+            bin_p = bin_p.rolling(roll_smooth, center=True, min_periods=1).mean()
+        bands.append(
+            pd.DataFrame(
+                {
+                    "feature": feat,
+                    "bin_left": [iv.left for iv in bin_mid.index],
+                    "bin_right": [iv.right for iv in bin_mid.index],
+                    "bin_mid": bin_mid.to_numpy(dtype=float),
+                    "evidence": bin_p.to_numpy(dtype=float),
+                }
+            )
+        )
+    if not bands:
+        raise ValueError("No descriptor-evidence bands could be computed.")
+    bands_df = pd.concat(bands, ignore_index=True)
+
+    lookup = {}
+    for feat, group in bands_df.groupby("feature", sort=False):
+        lookup[feat] = {
+            "intervals": pd.IntervalIndex.from_arrays(
+                group["bin_left"].to_numpy(dtype=float),
+                group["bin_right"].to_numpy(dtype=float),
+                closed="right",
+            ),
+            "evidence": group["evidence"].to_numpy(dtype=float),
+        }
+
+    rows = []
+    for _, row in df_x.iterrows():
+        evidences = []
+        result = {
+            "Composition": row["Composition"],
+            "n_metals": float(row["n_metals"]),
+            "P_single": float(row["P_single"]),
+        }
+        for feat in feature_cols:
+            value = row.get(feat, np.nan)
+            if feat not in lookup or pd.isna(value):
+                result[f"evidence__{feat}"] = np.nan
+                continue
+            item = lookup[feat]
+            idx = item["intervals"].get_indexer([float(value)])[0]
+            evidence = float(item["evidence"][idx]) if idx >= 0 else np.nan
+            result[f"evidence__{feat}"] = evidence
+            if np.isfinite(evidence):
+                evidences.append(evidence)
+        result["n_evidence"] = int(len(evidences))
+        result["Basin_score"] = float(np.mean(evidences)) if evidences else np.nan
+        rows.append(result)
+
+    scores = pd.DataFrame(rows)
+    return scores, bands_df
+
+
+def apply_equation_selection(
+    basin_scores: pd.DataFrame,
+    efa_predictions: pd.DataFrame,
+    rho: float,
+    eta: float,
+    orders: Sequence[int] = (9, 10, 11),
+    efa_column: str = "Predicted_EFA",
+) -> pd.DataFrame:
+    """Apply Eqs. 3--5 independently within each requested cation order."""
+    for name, value in {"rho": rho, "eta": eta}.items():
+        if not 0 < float(value) <= 1:
+            raise ValueError(f"{name} must be in (0, 1].")
+    required = {"Composition", "n_metals", "Basin_score"}
+    missing = required.difference(basin_scores.columns)
+    if missing:
+        raise ValueError(f"basin_scores is missing columns: {sorted(missing)}")
+    if "Composition" not in efa_predictions.columns or efa_column not in efa_predictions.columns:
+        raise ValueError(
+            f"efa_predictions must contain 'Composition' and '{efa_column}' columns."
+        )
+
+    efa = efa_predictions[["Composition", efa_column]].copy()
+    efa["Composition"] = efa["Composition"].astype(str).map(canonicalize)
+    if efa["Composition"].duplicated().any():
+        raise ValueError("efa_predictions contains duplicate compositions.")
+    efa[efa_column] = pd.to_numeric(efa[efa_column], errors="coerce")
+
+    merged = basin_scores.copy()
+    merged["Composition"] = merged["Composition"].astype(str).map(canonicalize)
+    merged = merged.merge(efa, on="Composition", how="left", validate="one_to_one")
+    outputs = []
+    for order in orders:
+        pool = merged[merged["n_metals"] == float(order)].copy()
+        if pool.empty:
+            continue
+        pool = pool.sort_values(
+            ["Basin_score", "P_single", "Composition"],
+            ascending=[False, False, True],
+        ).reset_index(drop=True)
+        pool["Basin_rank"] = np.arange(1, len(pool) + 1)
+        n_basin = max(1, int(math.ceil(float(rho) * len(pool))))
+        pool["Eq3_selected"] = pool["Basin_rank"] <= n_basin
+
+        eligible = pool[pool["Eq3_selected"] & pool[efa_column].notna()].copy()
+        eligible = eligible.sort_values(
+            [efa_column, "Basin_score", "Composition"],
+            ascending=[False, False, True],
+        )
+        n_final = max(1, int(math.ceil(float(eta) * len(eligible)))) if len(eligible) else 0
+        efa_rank = pd.Series(np.arange(1, len(eligible) + 1), index=eligible.index)
+        pool["EFA_rank_within_Eq3"] = efa_rank.reindex(pool.index).astype("Int64")
+        selected_index = set(eligible.index[:n_final])
+        pool["Eq5_selected"] = pool.index.map(lambda idx: idx in selected_index)
+        pool["rho"] = float(rho)
+        pool["eta"] = float(eta)
+        pool["Eq3_count"] = int(n_basin)
+        pool["Eq5_count"] = int(n_final)
+        outputs.append(pool)
+
+    if not outputs:
+        return pd.DataFrame()
+    return pd.concat(outputs, ignore_index=True)
+
+
 def compute_candidate_ranking(
     df_x: pd.DataFrame,
     feature_cols: Sequence[str],

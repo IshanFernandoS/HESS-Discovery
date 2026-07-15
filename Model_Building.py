@@ -1,328 +1,315 @@
+"""Manuscript-consistent GNN training/evaluation entry point.
+
+The original repository script used an 80/20 HEC5 split, an 8-layer checkpoint
+and MSE loss. Those settings do not reproduce the revised manuscript. This
+script documents and runs the GNN path used for the current paper:
+
+- HEC5 90/10 train/hold-out split with random_state=42;
+- GCNEncoder(hidden_dim=4, num_layers=2, heads=32, dropout=0.2);
+- Smooth L1 loss for training;
+- checkpoint selection by best HEC5 hold-out R2;
+- HEC6 evaluation on 22 unique POCC-DFT compositions.
+
+The HEC5 hold-out subset is a model-selection subset, not an untouched final
+test set. The HEC6 set is a targeted transfer/architecture-sensitivity
+benchmark and is not used for GNN weight updates.
+"""
+
+from __future__ import annotations
+
+import argparse
+import json
+import sys
+from pathlib import Path
+
 import numpy as np
 import pandas as pd
 import torch
-from pymatgen.core import Composition
-
-# ------------------- Load Features -------------------
-train_features_file = "./data/final_features_train.npy"
-final_features_train = np.load(train_features_file)
-print(f"Loaded HEC5 full data shape: {final_features_train.shape}")
-
-# ------------------- Load Target Values -------------------
-hec5_file = "./data/HEC5_output.csv"
-hec5_df = pd.read_csv(hec5_file)
-efa_values = hec5_df['EFA'].values
-assert len(final_features_train) == len(efa_values), "Mismatch between features and EFA values!"
-
-features = np.array(final_features_train, dtype=np.float32)
-efa = np.array(efa_values, dtype=np.float32)
-
-# ------------------- Load Test Features -------------------
-test_features_file = "./data/final_features_test.npy"    # replace with your actual test .npy filename
-final_features_test = np.load(test_features_file)
-print(f"Loaded HEC8 test data shape: {final_features_test.shape}")
-
-# ------------------- Load Test Target Values -------------------
-hec8_file = "./data/HEC8_output.csv"                   # replace if your filename differs
-hec8_df = pd.read_csv(hec8_file)
-efa_test_values = hec8_df['EFA'].values
-assert len(final_features_test) == len(efa_test_values), (
-    f"Mismatch between test features ({len(final_features_test)}) "
-    f"and test EFA values ({len(efa_test_values)})!"
-)
-
-# Cast to float32 for consumption by your model
-features_test = np.array(final_features_test, dtype=np.float32)
-efa_test     = np.array(efa_test_values,  dtype=np.float32)
-
-# ------------------- Train-Test Split -------------------
-from sklearn.model_selection import train_test_split
-X_train, X_test, y_train, y_test = train_test_split(
-    features,
-    efa,
-    test_size=0.2,
-    random_state=42
-)
-print(f"Split into {len(X_train)} train and {len(X_test)} test samples.")
-
-# ------------------- Create Edge Index & Edge Attr -------------------
-from torch_geometric.utils import dense_to_sparse
-
-def create_edge_index(n):
-    adj = torch.ones((n, n)) - torch.eye(n)
-    return dense_to_sparse(adj)[0]
-
-def create_edge_attr(x, edge_index):
-    src, dst = edge_index
-    n = x.size(0)
-    last = n - 1
-    ea = torch.zeros(src.size(0), 1, dtype=x.dtype, device=x.device)
-    mask_s = (src == last)
-    ea[mask_s] = x[dst[mask_s], -1].unsqueeze(-1)
-    mask_d = (dst == last) & ~mask_s
-    ea[mask_d] = x[src[mask_d], -1].unsqueeze(-1)
-    return ea
-
-edge_index_train = create_edge_index(6)
-
-# ------------------- Create PyG Data Objects -------------------
-from torch_geometric.data import Data
-
-train_set = []
-for i in range(len(X_train)):
-    x_i = torch.tensor(X_train[i], dtype=torch.float32)
-    ei = edge_index_train
-    ea = create_edge_attr(x_i, ei)
-    data_i = Data(x=x_i, edge_index=ei, edge_attr=ea, y=torch.tensor(y_train[i], dtype=torch.float32))
-    train_set.append(data_i)
-
-test_set = []
-for i in range(len(X_test)):
-    x_i = torch.tensor(X_test[i], dtype=torch.float32)
-    ei = edge_index_train
-    ea = create_edge_attr(x_i, ei)
-    data_i = Data(x=x_i, edge_index=ei, edge_attr=ea, y=torch.tensor(y_test[i], dtype=torch.float32))
-    test_set.append(data_i)
-
-from torch_geometric.data import Data
-
-edge_index_val = create_edge_index(9)
-
-val_set = []
-for i in range(len(features_test)):
-    x_i = torch.tensor(features_test[i], dtype=torch.float32)
-    ei = edge_index_val  
-    ea = create_edge_attr(x_i, ei)
-    data_i = Data(
-        x         = x_i,
-        edge_index= ei,
-        edge_attr = ea,
-        y         = torch.tensor(efa_test[i], dtype=torch.float32)
-    )
-    val_set.append(data_i)
-
-# ------------------- Create Data Loaders -------------------
-from torch_geometric.loader import DataLoader
-
-train_loader = DataLoader(train_set, batch_size=4, shuffle=True)
-test_loader = DataLoader(test_set, batch_size=4, shuffle=True)
-
-# ------------------- Define the GATv2 Model -------------------
-import torch
 import torch.nn as nn
-from torch_geometric.nn import GATv2Conv, GlobalAttention
-from torch_geometric.nn import GraphNorm
-
-class GCNEncoder(nn.Module):
-    def __init__(self, in_channels=35, hidden_dim=50, num_layers=2, heads=1, dropout=0.1):
-        super().__init__()
-        self.convs = nn.ModuleList()
-        self.norms = nn.ModuleList()
-
-        # Initial layer
-        self.convs.append(
-            GATv2Conv(
-                in_channels=in_channels - 1,
-                out_channels=hidden_dim,
-                heads=heads,
-                dropout=dropout,
-                edge_dim=1,
-                concat=False
-            )
-        )
-        # self.norms.append(nn.LayerNorm(hidden_dim * heads))
-
-        # Additional layers
-        for _ in range(1, num_layers):
-            self.convs.append(
-                GATv2Conv(
-                    in_channels=hidden_dim,
-                    out_channels=hidden_dim,
-                    heads=heads,
-                    dropout=dropout,
-                    concat=False
-                )
-            )
-            self.norms.append(GraphNorm(hidden_dim))
-
-        self.dropout = nn.Dropout(dropout)
-        self.activation = nn.ReLU()
-
-        # Attention pooling
-        self.gate_nn = nn.Sequential(
-            nn.Linear(hidden_dim, 1),
-            nn.Sigmoid()
-        )
-        self.att_pool = GlobalAttention(gate_nn=self.gate_nn)
-
-        # Final readout MLP
-        self.readout_mlp = nn.Sequential(
-            # nn.Linear(hidden_dim, hidden_dim),
-            # nn.ReLU(),
-            # nn.Dropout(dropout),
-            nn.Linear(hidden_dim, 1)
-        )
-
-    def forward(self, data):
-        x, edge_index, batch = data.x, data.edge_index, data.batch
-        node_features = x[:, :-1].float()
-        num_nodes = x.size(0)
-        src, tgt = edge_index
-
-        edge_attr = torch.zeros(src.size(0), 1, device=x.device, dtype=x.dtype)
-        mask_src = (src == (num_nodes - 1))
-        if mask_src.sum() > 0:
-            edge_attr[mask_src] = x[tgt[mask_src], -1].unsqueeze(-1)
-        mask_tgt = (tgt == (num_nodes - 1)) & ~(src == (num_nodes - 1))
-        if mask_tgt.sum() > 0:
-            edge_attr[mask_tgt] = x[src[mask_tgt], -1].unsqueeze(-1)
-        edge_attr = edge_attr.float()
-
-        out = node_features
-        for i, (conv, norm) in enumerate(zip(self.convs, self.norms)):
-            residual = out
-            if i == 0:
-                out = conv(out, edge_index,edge_attr)
-            else:
-                out = conv(out, edge_index)  # No edge_attr in subsequent layers
-            
-            out = norm(out)
-            out = self.activation(out)
-            out = self.dropout(out)
-
-            if out.size() == residual.size():
-                out = out + residual
-
-        graph_emb = self.att_pool(out, batch=batch)
-        out = self.readout_mlp(graph_emb)
-        return out
-# ------------------- Set Up Training -------------------
-import torch.optim as optim
-
-device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-print(f"Device: {device}")
-
-model = GCNEncoder(
-    in_channels=35, 
-    hidden_dim=52,
-    num_layers=8,
-    heads=4,
-    dropout=0.3
-).to(device)
-
-# model.load_state_dict(torch.load("_model_50999_after_8l.pth",weights_only=True))
-
-epochs = 1000000  # reduce for faster runs
-lr = 5e-5
-optimizer = optim.Adam(model.parameters(), lr=lr, amsgrad=False)
-train_loss_fn = nn.MSELoss()
-val_loss_fn = nn.L1Loss()
-
-
-
+from sklearn.metrics import (
+    accuracy_score,
+    confusion_matrix,
+    mean_absolute_error,
+    precision_recall_fscore_support,
+    r2_score,
+)
+from sklearn.model_selection import train_test_split
 from torch_geometric.loader import DataLoader
-from sklearn.metrics import r2_score
 
-# 0) build loaders once
-train_loader = DataLoader(train_set, batch_size=4, shuffle=True)
-val_loader   = DataLoader(val_set,   batch_size=4, shuffle=False)
-test_loader  = DataLoader(test_set,  batch_size=4, shuffle=False)
+if __package__ is None or __package__ == "":
+    sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-train_losses = []
-val_losses   = []
-test_losses  = []
-val_r2s      = []
-test_r2s     = []
+from validations.common import canonicalize
+from validations.generate_refined_figure_s10 import (
+    GCNEncoder,
+    build_matminer_element_feature_lookup,
+    graph_from_composition_matminer,
+    load_model,
+)
 
-eval_every = 5
 
-print("Starting training...")
-for epoch in range(1, epochs + 1):
-    # ---- train ----
-    model.train()
-    total_train_loss = 0.0
-    for batch in train_loader:
-        batch = batch.to(device)
-        optimizer.zero_grad()
-        out    = model(batch).view(-1)
-        target = batch.y.view(-1)
-        loss   = train_loss_fn(out, target)
-        loss.backward()
-        optimizer.step()
-        total_train_loss += loss.item() * batch.num_graphs
+def set_seed(seed: int) -> None:
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+    if torch.cuda.is_available():
+        torch.cuda.manual_seed_all(seed)
 
-    avg_train_loss = total_train_loss / len(train_set)
-    train_losses.append(avg_train_loss)
 
-    # ---- validate & test ----
-    if epoch % eval_every == 0:
-        model.eval()
+def read_table(path: str | Path) -> pd.DataFrame:
+    path = Path(path)
+    if path.suffix.lower() in {".xlsx", ".xls"}:
+        return pd.read_excel(path)
+    return pd.read_csv(path)
 
-        # validation
-        total_val_loss = 0.0
-        all_val_preds  = []
-        all_val_targs  = []
-        with torch.no_grad():
-            for batch in val_loader:
-                batch = batch.to(device)
-                out    = model(batch).view(-1)
-                target = batch.y.view(-1)
-                loss   = val_loss_fn(out, target)
-                total_val_loss += loss.item() * batch.num_graphs
-                all_val_preds.append(out.cpu().numpy())
-                all_val_targs.append(target.cpu().numpy())
 
-        avg_val_loss = total_val_loss / len(val_set)
-        val_losses.append(avg_val_loss)
-        all_val_preds = np.concatenate(all_val_preds)
-        all_val_targs = np.concatenate(all_val_targs)
-        val_r2 = r2_score(all_val_targs, all_val_preds)
-        val_r2s.append(val_r2)
+def attach_targets(graphs: list, targets: np.ndarray) -> list:
+    for graph, target in zip(graphs, targets):
+        graph.y = torch.tensor(float(target), dtype=torch.float32)
+    return graphs
 
-        # test
-        total_test_loss = 0.0
-        all_test_preds  = []
-        all_test_targs  = []
-        with torch.no_grad():
-            for batch in test_loader:
-                batch = batch.to(device)
-                out    = model(batch).view(-1)
-                target = batch.y.view(-1)
-                loss   = val_loss_fn(out, target)
-                total_test_loss += loss.item() * batch.num_graphs
-                all_test_preds.append(out.cpu().numpy())
-                all_test_targs.append(target.cpu().numpy())
 
-        avg_test_loss = total_test_loss / len(test_set)
-        test_losses.append(avg_test_loss)
-        all_test_preds = np.concatenate(all_test_preds)
-        all_test_targs = np.concatenate(all_test_targs)
-        test_r2 = r2_score(all_test_targs, all_test_preds)
-        test_r2s.append(test_r2)
+def make_graphs(compositions: list[str], element_features: dict[str, np.ndarray]) -> list:
+    return [graph_from_composition_matminer(comp, element_features) for comp in compositions]
 
-        print(f"[Epoch {epoch}/{epochs}] "
-              f"Train Loss: {avg_train_loss:.4f} | "
-              f"Val Loss: {avg_val_loss:.4f} (R²={val_r2:.3f}) | "
-              f"Test Loss: {avg_test_loss:.4f} (R²={test_r2:.3f})")
+
+def predict_loader(model: nn.Module, graphs: list, device: torch.device, batch_size: int) -> np.ndarray:
+    loader = DataLoader(graphs, batch_size=batch_size, shuffle=False)
+    pred = []
+    model.eval()
+    with torch.no_grad():
+        for batch in loader:
+            batch = batch.to(device)
+            pred.append(model(batch).view(-1).detach().cpu().numpy())
+    return np.concatenate(pred)
+
+
+def metric_summary(y_true: np.ndarray, y_pred: np.ndarray, threshold: float = 45.0) -> dict:
+    y_true = np.asarray(y_true, dtype=float)
+    y_pred = np.asarray(y_pred, dtype=float)
+    true_label = (y_true > threshold).astype(int)
+    pred_label = (y_pred > threshold).astype(int)
+    precision, recall, f1, _ = precision_recall_fscore_support(
+        true_label,
+        pred_label,
+        average="binary",
+        zero_division=0,
+    )
+    cm = confusion_matrix(true_label, pred_label, labels=[0, 1])
+    tn, fp, fn, tp = [int(x) for x in cm.ravel()]
+    return {
+        "n": int(len(y_true)),
+        "r2": float(r2_score(y_true, y_pred)),
+        "mae": float(mean_absolute_error(y_true, y_pred)),
+        "accuracy_at_45": float(accuracy_score(true_label, pred_label)),
+        "precision_single_at_45": float(precision),
+        "recall_single_at_45": float(recall),
+        "f1_single_at_45": float(f1),
+        "tn": tn,
+        "fp": fp,
+        "fn": fn,
+        "tp": tp,
+        "threshold": float(threshold),
+    }
+
+
+def load_hec5(hec5_path: str | Path) -> pd.DataFrame:
+    hec5 = read_table(hec5_path)
+    if "Composition" not in hec5.columns or "EFA" not in hec5.columns:
+        raise ValueError("HEC5 table must contain Composition and EFA columns.")
+    hec5 = hec5[["Composition", "EFA"]].copy()
+    hec5["Composition"] = hec5["Composition"].astype(str).map(canonicalize)
+    hec5["EFA"] = pd.to_numeric(hec5["EFA"], errors="raise")
+    return hec5
+
+
+def load_hec6_unique(hec6_path: str | Path) -> tuple[pd.DataFrame, int]:
+    hec6 = read_table(hec6_path)
+    if "Composition" not in hec6.columns or "Actual_EFA" not in hec6.columns:
+        raise ValueError("HEC6 table must contain Composition and Actual_EFA columns.")
+    hec6 = hec6[["Composition", "Actual_EFA"]].copy()
+    hec6["Composition"] = hec6["Composition"].astype(str).map(canonicalize)
+    hec6["Actual_EFA"] = pd.to_numeric(hec6["Actual_EFA"], errors="raise")
+    duplicate_rows = int(hec6["Composition"].duplicated().sum())
+    hec6 = hec6.drop_duplicates("Composition", keep="first").reset_index(drop=True)
+    return hec6, duplicate_rows
+
+
+def evaluate_checkpoint(args: argparse.Namespace) -> None:
+    outdir = Path(args.outdir)
+    outdir.mkdir(parents=True, exist_ok=True)
+    device = torch.device(args.device or ("cuda" if torch.cuda.is_available() else "cpu"))
+    element_features, feature_labels = build_matminer_element_feature_lookup(Path(args.repo_root))
+    model = load_model(Path(args.checkpoint), device, in_channels=len(feature_labels))
+
+    hec5 = load_hec5(args.hec5)
+    indices = np.arange(len(hec5))
+    _, holdout_idx = train_test_split(
+        indices,
+        test_size=args.holdout_fraction,
+        random_state=args.split_seed,
+    )
+    hec5_holdout = hec5.iloc[holdout_idx].reset_index(drop=True)
+    hec5_graphs = make_graphs(hec5_holdout["Composition"].tolist(), element_features)
+    hec5_pred = predict_loader(model, hec5_graphs, device, args.batch_size)
+    hec5_out = hec5_holdout.copy()
+    hec5_out["Predicted_EFA"] = hec5_pred
+    hec5_out["Residual"] = hec5_out["Predicted_EFA"] - hec5_out["EFA"]
+    hec5_metrics = metric_summary(hec5_out["EFA"].to_numpy(), hec5_pred, args.threshold)
+    hec5_metrics.update(
+        {
+            "split_seed": int(args.split_seed),
+            "holdout_fraction": float(args.holdout_fraction),
+            "evaluation_role": "HEC5 hold-out model-selection subset",
+        }
+    )
+
+    hec6, duplicate_rows = load_hec6_unique(args.hec6)
+    hec6_graphs = make_graphs(hec6["Composition"].tolist(), element_features)
+    hec6_pred = predict_loader(model, hec6_graphs, device, args.batch_size)
+    hec6_out = hec6.copy()
+    hec6_out["Predicted_EFA"] = hec6_pred
+    hec6_out["Residual"] = hec6_out["Predicted_EFA"] - hec6_out["Actual_EFA"]
+    hec6_metrics = metric_summary(hec6_out["Actual_EFA"].to_numpy(), hec6_pred, args.threshold)
+    hec6_metrics.update(
+        {
+            "duplicate_rows_removed": duplicate_rows,
+            "evaluation_role": "22-unique-composition HEC6 POCC-DFT transfer benchmark",
+        }
+    )
+
+    hec5_out.to_csv(outdir / "hec5_holdout_predictions.csv", index=False)
+    hec6_out.to_csv(outdir / "hec6_unique_predictions.csv", index=False)
+    provenance = {
+        "checkpoint": str(Path(args.checkpoint)),
+        "architecture": "GCNEncoder(hidden_dim=4, num_layers=2, heads=32, dropout=0.2)",
+        "feature_generation": "matminer/pymatgen element features plus Bond.xlsx",
+        "n_node_features": len(feature_labels),
+        "edge_attr_rule": "carbon-edge feature plus metal-metal absolute formation-energy-channel difference",
+        "hec5": hec5_metrics,
+        "hec6": hec6_metrics,
+    }
+    with (outdir / "gnn_evaluation_metrics.json").open("w", encoding="utf-8") as handle:
+        json.dump(provenance, handle, indent=2)
+
+    print("HEC5 hold-out metrics:")
+    print(pd.DataFrame([hec5_metrics]).to_string(index=False))
+    print("\nHEC6 unique-composition metrics:")
+    print(pd.DataFrame([hec6_metrics]).to_string(index=False))
+    print(f"\nOutputs: {outdir.resolve()}")
+
+
+def train_checkpoint(args: argparse.Namespace) -> None:
+    set_seed(args.seed)
+    outdir = Path(args.outdir)
+    outdir.mkdir(parents=True, exist_ok=True)
+    device = torch.device(args.device or ("cuda" if torch.cuda.is_available() else "cpu"))
+    element_features, feature_labels = build_matminer_element_feature_lookup(Path(args.repo_root))
+
+    hec5 = load_hec5(args.hec5)
+    indices = np.arange(len(hec5))
+    train_idx, holdout_idx = train_test_split(
+        indices,
+        test_size=args.holdout_fraction,
+        random_state=args.split_seed,
+    )
+    train = hec5.iloc[train_idx].reset_index(drop=True)
+    holdout = hec5.iloc[holdout_idx].reset_index(drop=True)
+    train_graphs = attach_targets(
+        make_graphs(train["Composition"].tolist(), element_features),
+        train["EFA"].to_numpy(dtype=float),
+    )
+    holdout_graphs = attach_targets(
+        make_graphs(holdout["Composition"].tolist(), element_features),
+        holdout["EFA"].to_numpy(dtype=float),
+    )
+
+    model = GCNEncoder(in_channels=len(feature_labels)).to(device)
+    optimizer = torch.optim.Adam(
+        model.parameters(),
+        lr=args.learning_rate,
+        weight_decay=args.weight_decay,
+        amsgrad=False,
+    )
+    loss_fn = nn.SmoothL1Loss()
+    train_loader = DataLoader(train_graphs, batch_size=args.batch_size, shuffle=True)
+
+    best_state = None
+    best_r2 = -np.inf
+    stale = 0
+    history = []
+    for epoch in range(1, args.max_epochs + 1):
+        model.train()
+        total_loss = 0.0
+        n_graphs = 0
+        for batch in train_loader:
+            batch = batch.to(device)
+            optimizer.zero_grad()
+            pred = model(batch).view(-1)
+            loss = loss_fn(pred, batch.y.view(-1))
+            loss.backward()
+            optimizer.step()
+            total_loss += float(loss.item()) * batch.num_graphs
+            n_graphs += batch.num_graphs
+
+        if epoch % args.eval_every != 0:
+            continue
+
+        holdout_pred = predict_loader(model, holdout_graphs, device, args.batch_size)
+        holdout_r2 = float(r2_score(holdout["EFA"].to_numpy(dtype=float), holdout_pred))
+        row = {
+            "epoch": int(epoch),
+            "train_loss": total_loss / max(1, n_graphs),
+            "holdout_r2": holdout_r2,
+            "holdout_mae": float(mean_absolute_error(holdout["EFA"], holdout_pred)),
+        }
+        history.append(row)
+        print(row)
+
+        if holdout_r2 > best_r2:
+            best_r2 = holdout_r2
+            best_state = {key: value.detach().cpu().clone() for key, value in model.state_dict().items()}
+            stale = 0
+        else:
+            stale += 1
+        if args.patience and stale >= args.patience:
+            break
+
+    if best_state is None:
+        raise RuntimeError("Training ended before the first hold-out evaluation.")
+    output_checkpoint = Path(args.output_checkpoint)
+    output_checkpoint.parent.mkdir(parents=True, exist_ok=True)
+    torch.save(best_state, output_checkpoint)
+    pd.DataFrame(history).to_csv(outdir / "training_history.csv", index=False)
+    print(f"Saved best checkpoint to {output_checkpoint.resolve()} with hold-out R2={best_r2:.4f}")
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(description="Run manuscript-consistent HEC GNN training/evaluation.")
+    parser.add_argument("--repo-root", default=".", help="Repository root containing data/ and checkpoints/.")
+    parser.add_argument("--hec5", default="data/HEC5_output.csv")
+    parser.add_argument("--hec6", default="DFT_Calculations/DFT_calculated_EFA_for_HEC6.csv")
+    parser.add_argument("--checkpoint", default="checkpoints/best_gnn_model_4_2_32_88.0.pth")
+    parser.add_argument("--outdir", default="validation_outputs/manuscript_gnn")
+    parser.add_argument("--holdout-fraction", type=float, default=0.10)
+    parser.add_argument("--split-seed", type=int, default=42)
+    parser.add_argument("--threshold", type=float, default=45.0)
+    parser.add_argument("--batch-size", type=int, default=256)
+    parser.add_argument("--device", default=None)
+    parser.add_argument("--train", action="store_true", help="Retrain from HEC5 instead of only evaluating checkpoint.")
+    parser.add_argument("--seed", type=int, default=42)
+    parser.add_argument("--learning-rate", type=float, default=5e-5)
+    parser.add_argument("--weight-decay", type=float, default=1e-6)
+    parser.add_argument("--max-epochs", type=int, default=1_000_000)
+    parser.add_argument("--eval-every", type=int, default=1000)
+    parser.add_argument("--patience", type=int, default=20)
+    parser.add_argument("--output-checkpoint", default="checkpoints/retrained_manuscript_gnn.pth")
+    args = parser.parse_args()
+
+    if args.train:
+        train_checkpoint(args)
     else:
-        print(f"[Epoch {epoch}/{epochs}] Train Loss: {avg_train_loss:.4f}")
-
-    # optional checkpoint
-    if epoch % 1000 == 0:
-        torch.save(model.state_dict(), f"_model_{epoch}_after_xl.pth")
+        evaluate_checkpoint(args)
 
 
-# ------------------- Plot Training Curve -------------------
-import matplotlib.pyplot as plt
-
-plt.figure()
-plt.plot(range(1, epochs+1), train_losses, label='Train Loss')
-val_x = list(range(5, epochs+1, 5))
-plt.plot(val_x, val_losses, label='Val Loss')
-plt.xlabel('Epoch')
-plt.ylabel('Loss')
-plt.title('GATv2 Training & Validation Loss (HEC5 Split)')
-plt.legend()
-plt.savefig("loss_curve.png")
-plt.close()
-print("Saved final loss curve to 'loss_curve.png'.")
+if __name__ == "__main__":
+    main()
