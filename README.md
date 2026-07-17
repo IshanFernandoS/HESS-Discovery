@@ -31,8 +31,9 @@ best_gnn_model_4_2_32_88.0.pth
 ```
 
 Place this checkpoint in `checkpoints/` or pass its path with `--checkpoint`.
-The older checkpoint `checkpoints/_model_26999_after_7l.pth` is retained only
-for legacy comparison and should not be used for manuscript figures or tables.
+The older checkpoint `legacy/checkpoints/_model_26999_after_7l.pth` is retained
+only for legacy comparison and should not be used for manuscript figures or
+tables.
 
 ### 2. GMM Basin Evidence
 
@@ -83,12 +84,38 @@ python validations/generate_equation_selection_table.py
 
 Regenerates the manuscript Table 2 source files from the Eq. (1)-(5) audit.
 
+```bash
+python validations/generate_table_s4_gmm_cluster_diagnostics.py
+python validations/gnn_architecture_sweep.py
+python validations/plot_figure_s5_gnn_transfer_corrected.py
+python validations/plot_figure_s7_gnn_rf_unique.py
+```
+
+Regenerates corrected Supplementary Table S4 and Figures S5/S7 from the
+manuscript-consistent inputs and 22-unique-composition HEC6 benchmark.
+
 ## HEC6 Benchmark Convention
 
 `DFT_Calculations/DFT_calculated_EFA_for_HEC6.csv` contains 22 unique HEC6
 compositions. The duplicate `(HfMoNbTaTiZr)C6` entry present in earlier working
 files was removed so that manuscript tables and code use the same unique-count
 benchmark.
+
+## Supplementary Data Archives
+
+The submission-ready Supplementary Data 1-4 ZIP archives are mirrored in
+`supplementary_data/` for repository-level reproducibility of the submitted
+data packages.
+
+Supplementary Data 4 contains the 22-composition HEC6 EFA summary and
+representative AFLOW-POCC/VASP inputs/scripts. It does not contain the
+configuration-level POCC/VASP structures, degeneracies, or absolute total
+energies required to independently recompute every HEC6 EFA value. Reproducing
+those values from first principles requires rerunning the AFLOW-POCC/VASP
+workflow from the supplied inputs and scripts.
+
+VASP PAW/POTCAR archives are not distributed in this repository. Users must
+provide any required licensed VASP potential data locally.
 
 ## Validation Scripts
 

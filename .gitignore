@@ -1,3 +1,7 @@
 __pycache__/
 *.py[cod]
 validation_outputs/
+.DS_Store
+**/.DS_Store
+DFT_Calculations/potpaw_*.tgz
+DFT_Calculations/aflow/bin/python*

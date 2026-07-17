@@ -140,6 +140,36 @@ python Model_Building.py --checkpoint checkpoints/best_gnn_model_4_2_32_88.0.pth
 
 Outputs HEC5 hold-out model-selection subset metrics and HEC6 22-unique-composition transfer metrics.
 
+### Corrected Supplementary Table S4
+
+```bash
+python validations/generate_table_s4_gmm_cluster_diagnostics.py
+```
+
+Regenerates the GMM component-diagnostics table with the active nine-descriptor
+feature matrix and the manuscript direction conventions.
+
+### Corrected Supplementary Figure S5
+
+Run the architecture sweep first, then regenerate the figure:
+
+```bash
+python validations/gnn_architecture_sweep.py
+python validations/plot_figure_s5_gnn_transfer_corrected.py
+```
+
+The sweep uses the 90/10 HEC5 model-selection subset and the 22 unique HEC6
+transfer compositions.
+
+### Corrected Supplementary Figure S7
+
+```bash
+python validations/plot_figure_s7_gnn_rf_unique.py
+```
+
+Regenerates the GNN-versus-random-forest comparison on the same 22 unique HEC6
+compositions.
+
 ### MC-Dropout Uncertainty for HEC9-HEC11
 
 ```bash

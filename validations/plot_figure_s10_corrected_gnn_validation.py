@@ -11,6 +11,12 @@ import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 from matplotlib.lines import Line2D
+from sklearn.metrics import (
+    accuracy_score,
+    mean_absolute_error,
+    precision_recall_fscore_support,
+    r2_score,
+)
 
 
 COLORS = {
@@ -64,6 +70,61 @@ def add_panel_label(ax: plt.Axes, label: str) -> None:
 def load_metric_row(path: Path) -> dict[str, float]:
     df = pd.read_csv(path)
     return df.iloc[0].to_dict()
+
+
+def _classification_metrics(actual: np.ndarray, pred: np.ndarray, threshold: float) -> dict[str, float]:
+    true_cls = actual > threshold
+    pred_cls = pred > threshold
+    precision, recall, f1, _ = precision_recall_fscore_support(
+        true_cls.astype(int),
+        pred_cls.astype(int),
+        average="binary",
+        zero_division=0,
+    )
+    return {
+        "acc": float(accuracy_score(true_cls, pred_cls)),
+        "precision": float(precision),
+        "recall": float(recall),
+        "f1": float(f1),
+    }
+
+
+def compute_metric_row(
+    actual: np.ndarray,
+    pred: np.ndarray,
+    threshold: float = 45.0,
+    n_bootstrap: int = 2000,
+    seed: int = 42,
+) -> dict[str, float]:
+    actual = np.asarray(actual, dtype=float)
+    pred = np.asarray(pred, dtype=float)
+
+    point = {
+        "n": float(len(actual)),
+        "r2": float(r2_score(actual, pred)),
+        "mae": float(mean_absolute_error(actual, pred)),
+    }
+    point.update(_classification_metrics(actual, pred, threshold))
+
+    rng = np.random.default_rng(seed)
+    rows: list[dict[str, float]] = []
+    indices = np.arange(len(actual))
+    for _ in range(n_bootstrap):
+        sample = rng.choice(indices, size=len(indices), replace=True)
+        y_sample = actual[sample]
+        p_sample = pred[sample]
+        row = {
+            "r2": float(r2_score(y_sample, p_sample)) if len(np.unique(y_sample)) > 1 else np.nan,
+            "mae": float(mean_absolute_error(y_sample, p_sample)),
+        }
+        row.update(_classification_metrics(y_sample, p_sample, threshold))
+        rows.append(row)
+
+    boot = pd.DataFrame(rows)
+    for key in ["r2", "mae", "acc", "precision", "recall", "f1"]:
+        point[f"{key}_low"] = float(np.nanpercentile(boot[key], 2.5))
+        point[f"{key}_high"] = float(np.nanpercentile(boot[key], 97.5))
+    return point
 
 
 def draw_parity(
@@ -219,7 +280,7 @@ def main() -> None:
     hec5_pred = pd.read_csv(deephec / "fig2" / "fig2a_hec5_predictions.csv")
     hec5_metrics_raw = load_metric_row(deephec / "fig2" / "fig2a_hec5_metrics.csv")
     hec6_pred = pd.read_csv(deephec / "fig2" / "HEC6_predictions.csv")
-    hec6_metrics_raw = load_metric_row(deephec / "fig2" / "HEC6_metrics_with_ci.csv")
+    hec6_pred = hec6_pred.drop_duplicates("composition", keep="first").reset_index(drop=True)
 
     hec5_metrics = {
         "n": hec5_metrics_raw["N_test"],
@@ -242,27 +303,11 @@ def main() -> None:
         "f1_low": hec5_metrics_raw["F1_CI_low"],
         "f1_high": hec5_metrics_raw["F1_CI_high"],
     }
-    hec6_metrics = {
-        "n": hec6_metrics_raw["N_samples"],
-        "r2": hec6_metrics_raw["R2"],
-        "r2_low": hec6_metrics_raw["R2_CI_low"],
-        "r2_high": hec6_metrics_raw["R2_CI_high"],
-        "mae": hec6_metrics_raw["MAE"],
-        "mae_low": hec6_metrics_raw["MAE_CI_low"],
-        "mae_high": hec6_metrics_raw["MAE_CI_high"],
-        "acc": hec6_metrics_raw["Accuracy"],
-        "acc_low": hec6_metrics_raw["Acc_CI_low"],
-        "acc_high": hec6_metrics_raw["Acc_CI_high"],
-        "precision": hec6_metrics_raw["Precision_Single"],
-        "precision_low": hec6_metrics_raw["Precision_CI_low"],
-        "precision_high": hec6_metrics_raw["Precision_CI_high"],
-        "recall": hec6_metrics_raw["Recall_Single"],
-        "recall_low": hec6_metrics_raw["Recall_CI_low"],
-        "recall_high": hec6_metrics_raw["Recall_CI_high"],
-        "f1": hec6_metrics_raw["F1_Single"],
-        "f1_low": hec6_metrics_raw["F1_CI_low"],
-        "f1_high": hec6_metrics_raw["F1_CI_high"],
-    }
+    hec6_metrics = compute_metric_row(
+        hec6_pred["efa_actual"].to_numpy(),
+        hec6_pred["efa_pred"].to_numpy(),
+        threshold=45.0,
+    )
 
     fig = plt.figure(figsize=(7.2, 2.85))
     gs = fig.add_gridspec(
