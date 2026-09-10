@@ -170,6 +170,18 @@ python validations/plot_figure_s7_gnn_rf_unique.py
 Regenerates the GNN-versus-random-forest comparison on the same 22 unique HEC6
 compositions.
 
+### Post Hoc Selection-Frequency Dropout Sensitivity
+
+```bash
+python validations/selection_frequency_dropout_sensitivity.py --n-draws 500
+```
+
+Recomputes Eq. (5) selection frequency across the reported 25-point `rho`/`eta`
+grid for each stochastic MC-dropout perturbation of the manuscript-consistent
+EFA-GNN. The analysis holds `B(c)`, candidate pools, and threshold settings
+fixed, and should be reported as dropout-perturbation sensitivity rather than a
+confidence interval for synthesis success.
+
 ### MC-Dropout Uncertainty for HEC9-HEC11
 
 ```bash
