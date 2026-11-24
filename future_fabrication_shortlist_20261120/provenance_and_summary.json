@@ -1,0 +1,32 @@
+{
+  "generated": "2026-11-20",
+  "candidate_universe": 3301,
+  "shortlist_rows": 59,
+  "rule": "positive joint index; top 10 within order; absent from current retention cohort",
+  "counts_by_order": {
+    "5": 10,
+    "6": 10,
+    "7": 10,
+    "8": 9,
+    "9": 8,
+    "10": 9,
+    "11": 3
+  },
+  "counts_by_tier": {
+    "Tier 1: I >= 0.90": 21,
+    "Tier 2: 0.70 <= I < 0.90": 21,
+    "Tier 3: 0.50 <= I < 0.70": 8,
+    "Tier 4: positive order-coverage candidate": 9
+  },
+  "higher_order_rows": 20,
+  "core_higher_order_rows_I_ge_0.50": 11,
+  "exploratory_higher_order_rows_I_below_0.50": 9,
+  "input_scores": "inputs/final_scores_3301.csv",
+  "input_scores_sha256": "6457c64b52eef1a1d387b74f3bbc9a9d0c65774c964f8928b5ed98d52d9fccdb",
+  "input_retention_cohort": "inputs/retention_scoped_records.csv",
+  "input_retention_cohort_sha256": "10769330e31132f4be84b887cdb0de9c362ff61527ff58c402175afbbfc478ed",
+  "output_csv": "future_fabrication_high_joint_index_candidates.csv",
+  "output_csv_sha256": "f6dea59c48cf3193b0300ecfacd99b397b14a6300a4cba79c90e5f2cf011ac3b",
+  "models_retrained": false,
+  "application_performance_predicted": false
+}
